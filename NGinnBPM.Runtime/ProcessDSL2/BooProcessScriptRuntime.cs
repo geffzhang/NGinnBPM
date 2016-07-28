@@ -282,6 +282,8 @@ namespace NGinnBPM.Runtime.ProcessDSL2
                 throw new Exception("Task not inited properly");
             _pd.SetTaskInstanceInfo(ti, ctx);
             _pd.SetOutputData(childOutputData);
+            _pd.SetInputData(null);
+            
             var ctd = childTask.Parent;
             if (childTask.AutoBindVariables && ctd.Variables != null)
             {
@@ -312,6 +314,25 @@ namespace NGinnBPM.Runtime.ProcessDSL2
                             break;
                     }
                 }
+            }
+        }
+
+
+        public void ExecuteTaskScriptBlock(TaskInstance ti, string blockName, ITaskExecutionContext ctx)
+        {
+            string k = DslUtil.TaskScriptKey(ti.TaskId, blockName);
+            _pd.SetTaskInstanceInfo(ti, ctx);
+            try
+            {
+                Action act;
+                if (_pd._stmts.TryGetValue(k, out act) && act != null)
+                {
+                    act();
+                }
+            }
+            catch (Exception ex)
+            {
+                throw;
             }
         }
     }

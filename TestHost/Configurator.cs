@@ -9,6 +9,7 @@ using Castle.MicroKernel.Registration;
 using NGinnBPM.Runtime;
 using NGinnBPM.Runtime.Services;
 using NGinnBPM.Runtime.Tasks;
+using NGinnBPM.Runtime.ExecutionEngine;
 using System.IO;
 
 namespace TestHost.cs
@@ -41,6 +42,18 @@ namespace TestHost.cs
             return this;
         }
 
+        public NGinnConfigurator ConfigureJsonProcessRepository(string baseDir)
+        {
+            string bd = AppDomain.CurrentDomain.BaseDirectory;
+            bd = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(bd, baseDir);
+            _wc.Register(Component.For<IProcessPackageRepo>().ImplementedBy<NGinnBPM.Runtime.ProcessDSL2.ProcessPackageRepository>()
+                .DependsOn(new
+                {
+                    BaseDirectory = bd
+                }).LifeStyle.Singleton);
+            return this;
+        }
+
         public NGinnConfigurator ConfigureSqlStorage(string connString)
         {
             _wc.Register(Component.For<IDbSessionFactory>()
@@ -54,11 +67,11 @@ namespace TestHost.cs
 
         public NGinnConfigurator FinishConfiguration()
         {
-            _wc.Register(Component.For<ProcessRunner>()
-                .ImplementedBy<ProcessRunner>()
+            _wc.Register(Component.For<ProcessEngine>()
+                .ImplementedBy<ProcessEngine>()
                 .LifeStyle.Singleton);
             _wc.Register(Component.For<ITaskInstancePersister>()
-                .ImplementedBy<SqlTaskInstancePersister>()
+                .ImplementedBy<SqlProcessPersister>()
                 .LifeStyle.Singleton);
             _wc.Register(Component.For<ITaskInstanceSerializer>()
                 .ImplementedBy<JsonTaskInstanceSerializer>());

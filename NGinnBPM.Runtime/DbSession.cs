@@ -5,6 +5,11 @@ using System.Text;
 
 namespace NGinnBPM.Runtime
 {
+    /// <summary>
+    /// Dbsession is a simple wrapper around a database connection used by NGinn BPM
+    /// Components participating in transaction can use DBSession for accessing the connection
+    /// and sharing it instead of opening a new one.
+    /// </summary>
     public class DbSession : IDisposable
     {
         [ThreadStatic]
@@ -16,6 +21,11 @@ namespace NGinnBPM.Runtime
             set { _cur = value; }
         }
 
+        public virtual object Connection 
+        {
+            get { return null; }
+        }
+        
         public virtual void Dispose()
         {
             

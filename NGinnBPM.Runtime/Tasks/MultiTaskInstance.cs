@@ -52,7 +52,30 @@ namespace NGinnBPM.Runtime.Tasks
             throw new NotImplementedException();
         }
 
-       
+        public override Dictionary<string, object> GetOutputData()
+        {
+            throw new Exception("Not supported in multi instance task. Use GetMultiOutputData");
+        }
+
+        public virtual List<Dictionary<string, object>> GetMultiOutputData()
+        {
+            List<Dictionary<string, object>> lst = new List<Dictionary<string, object>>();
+            foreach (TransitionInfo ti in ChildTransitions)
+            {
+                if (ti.Status == TransitionStatus.Completed)
+                {
+                    Dictionary<string, object> dob = ti.OutputData;
+                    if (dob == null) dob = new Dictionary<string, object>();
+                    lst.Add(ti.OutputData);
+                }
+                else
+                {
+                    log.Info("Skipping failed or cancelled child task: {0}", ti);
+                    lst.Add(null);
+                }
+            }
+            return lst;
+        }
 
         /// <summary>
         /// </summary>
@@ -71,8 +94,7 @@ namespace NGinnBPM.Runtime.Tasks
                 ti.InstanceId = AllocateNewTaskInstanceId(TaskId);
                 ChildTransitions.Add(ti);
                 
-                Context.SendTaskControlMessage(new EnableChildTask {
-                    Mode = MessageHandlingMode.SameTransaction,
+                Context.EnableChildTask(new EnableChildTask {
                     CorrelationId = ti.InstanceId,
                     FromProcessInstanceId = this.ProcessInstanceId,
                     FromTaskInstanceId = this.InstanceId,
@@ -103,11 +125,6 @@ namespace NGinnBPM.Runtime.Tasks
                 {
                     this.Status = TaskStatus.Enabled;
                     EnabledDate = DateTime.Now;
-                    Context.NotifyTaskEvent(new TaskEnabled {
-                        FromTaskInstanceId = this.InstanceId,
-                        ParentTaskInstanceId = this.ParentTaskInstanceId,
-                        FromProcessInstanceId = this.ProcessInstanceId
-                    });
                 }
             }
 
@@ -123,28 +140,8 @@ namespace NGinnBPM.Runtime.Tasks
             else
             {
                 Debug.Assert(Status == TaskStatus.Enabled || Status == TaskStatus.Selected);
-                List<Dictionary<string, object>> lst = new List<Dictionary<string, object>>();
-                foreach (TransitionInfo ti in ChildTransitions)
-                {
-                    if (ti.Status == TransitionStatus.Completed)
-                    {
-                        Dictionary<string, object> dob = ti.OutputData;
-                        if (dob == null) dob = new Dictionary<string, object>();
-                        lst.Add(ti.OutputData);
-                    }
-                    else
-                    {
-                        log.Info("Skipping failed or cancelled child task: {0}", ti);
-                    }
-                }
-                
+                var lst = GetMultiOutputData();
                 Status = TaskStatus.Completed;
-                Context.NotifyTaskEvent(new MultiTaskCompleted
-                {
-                    FromTaskInstanceId = this.InstanceId,
-                    ParentTaskInstanceId = this.ParentTaskInstanceId,
-                    MultiOutputData = lst
-                });
             }
         }
 
@@ -159,7 +156,7 @@ namespace NGinnBPM.Runtime.Tasks
                     ti.Status == TransitionStatus.Started)
                 {
                     ti.Status = TransitionStatus.Cancelling;
-                    Context.SendTaskControlMessage(new CancelTask
+                    Context.CancelChildTask(new CancelTask
                     {
                         FromProcessInstanceId = this.ProcessInstanceId,
                         FromTaskInstanceId = this.InstanceId,

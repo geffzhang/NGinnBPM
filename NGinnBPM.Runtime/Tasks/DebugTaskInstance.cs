@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Runtime.Serialization;
 using NGinnBPM.Runtime.TaskExecutionEvents;
+using NLog;
 
 namespace NGinnBPM.Runtime.Tasks
 {
@@ -13,20 +14,32 @@ namespace NGinnBPM.Runtime.Tasks
     [DataContract]
     public class DebugTaskInstance : AtomicTaskInstance
     {
+        private static Logger log = LogManager.GetCurrentClassLogger();
+
         [DataMember]
         public bool DoFail { get; set; }
         [DataMember]
         public bool Delay { get; set; }
+        
+        private void DumpState()
+        {
+            log.Info("Debug Task {0} [{1}]. Status: {2}", TaskId, InstanceId, Status);
+            foreach (var k in TaskData.Keys)
+            {
+                log.Info("  {0}={1}", k, TaskData[k]);
+            }
+        }
+
         protected override void OnTaskEnabling()
         {
+            DumpState();
             if (Delay)
             {
                 Context.ScheduleTaskEvent(new TaskTimerEvent
                 {
                     ParentTaskInstanceId = this.InstanceId,
                     FromTaskInstanceId = this.InstanceId,
-                    FromProcessInstanceId = this.ProcessInstanceId,
-                    Mode = MessageHandlingMode.AnotherTransaction
+                    FromProcessInstanceId = this.ProcessInstanceId
                 }, DateTime.Now.AddSeconds(10));
             }
             else

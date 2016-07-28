@@ -94,12 +94,13 @@ namespace NGinnBPM.Runtime.Tasks
             if (Status != TaskStatus.Enabling) throw new Exception("Invalid status!");
             this.TaskData = new Dictionary<string, object>();
             ScriptRuntime.InitializeNewTask(this, inputData, Context);
+            ScriptRuntime.ExecuteTaskScriptBlock(this, "BeforeEnable", Context);
             this.Status = TaskStatus.Enabled;
             EnabledDate = DateTime.Now;
             this.OnTaskEnabling();
-            if (this.Status == TaskStatus.Enabled)
+            if (Status == TaskStatus.Enabled && Status == TaskStatus.Selected || Status == TaskStatus.Completed)
             {
-                Context.NotifyTaskEvent(new TaskEnabled { FromTaskInstanceId = this.InstanceId, ParentTaskInstanceId = this.ParentTaskInstanceId });
+                ScriptRuntime.ExecuteTaskScriptBlock(this, "AfterEnable", Context);
             }
         }
 
@@ -112,22 +113,39 @@ namespace NGinnBPM.Runtime.Tasks
 
         public virtual void ForceComplete(Dictionary<string, object> updatedData)
         {
-
+            if (Status == TaskStatus.Cancelled || Status == TaskStatus.Completed ||
+                Status == TaskStatus.Failed)
+                return; //ignore the call
+            DefaultHandleTaskCompletion(updatedData);
         }
 
         public virtual void Cancel(string reason)
         {
+            if (Status == TaskStatus.Cancelled || Status == TaskStatus.Completed ||
+                Status == TaskStatus.Failed)
+                return; //ignore the call
+            
             DefaultHandleTaskCancel(reason);
         }
 
         public virtual void ForceFail(string errorInfo)
         {
+            if (Status == TaskStatus.Cancelled || Status == TaskStatus.Completed ||
+                Status == TaskStatus.Failed)
+                return; //ignore the call
+            
             DefaultHandleTaskFailure(errorInfo, true);
         }
 
         public virtual void Select()
         {
+            if (Status != TaskStatus.Enabled && Status != TaskStatus.Enabling)
+            {
+                return;
+            }
 
+            this.Status = TaskStatus.Selected;
+            
         }
 
         protected void Complete()
@@ -140,7 +158,7 @@ namespace NGinnBPM.Runtime.Tasks
         /// Return task output data.
         /// </summary>
         /// <returns></returns>
-        protected Dictionary<string, object> GetOutputData()
+        public virtual Dictionary<string, object> GetOutputData()
         {
             Dictionary<string, object> ret = new Dictionary<string, object>();
             if (TaskDefinition.Variables == null) return ret;
@@ -149,6 +167,10 @@ namespace NGinnBPM.Runtime.Tasks
                 if (vd.VariableDir == ProcessModel.Data.VariableDef.Dir.Out ||
                     vd.VariableDir == ProcessModel.Data.VariableDef.Dir.InOut)
                 {
+                    if (!TaskData.ContainsKey(vd.Name) && vd.IsRequired)
+                    {
+                        throw new Exception("Missing required variable:" + vd.Name);
+                    }
                     ret[vd.Name] = TaskData[vd.Name];
                 }
             }
@@ -166,12 +188,7 @@ namespace NGinnBPM.Runtime.Tasks
                 }
             }
             Status = TaskStatus.Completed;
-            Context.NotifyTaskEvent(new TaskCompleted
-            {
-                FromTaskInstanceId = this.InstanceId,
-                ParentTaskInstanceId = this.ParentTaskInstanceId,
-                OutputData = this.GetOutputData()
-            });
+            ScriptRuntime.ExecuteTaskScriptBlock(this, "AfterComplete", Context);
         }
 
         /// <summary>
@@ -180,14 +197,7 @@ namespace NGinnBPM.Runtime.Tasks
         /// <param name="reason"></param>
         protected virtual void DefaultHandleTaskCancel(string reason)
         {
-            Status = TaskStatus.Cancelled;
-            StatusInfo = reason;
-            Context.NotifyTaskEvent(new TaskCancelled
-            {
-                FromTaskInstanceId = this.InstanceId,
-                ParentTaskInstanceId = this.ParentTaskInstanceId,
-                CorrelationId = null
-            });
+            
         }
 
         /// <summary>
@@ -202,13 +212,14 @@ namespace NGinnBPM.Runtime.Tasks
                 throw new Exception("Invalid status");
             Status = TaskStatus.Failed;
             StatusInfo = errorInfo;
-            Context.NotifyTaskEvent(new TaskFailed
+            /*Context.NotifyTaskEvent(new TaskFailed
             {
                 FromTaskInstanceId = this.InstanceId,
                 ParentTaskInstanceId = this.ParentTaskInstanceId,
+                FromProcessInstanceId = this.ProcessInstanceId,
                 IsExpected = failureIntended,
                 ErrorInfo = errorInfo
-            });
+            });*/
         }
 
         public virtual void HandleTaskExecEvent(TaskExecEvent ev)
@@ -216,5 +227,10 @@ namespace NGinnBPM.Runtime.Tasks
             if (ev.ParentTaskInstanceId != this.InstanceId) throw new Exception("Invalid ParentTaskInstanceId");
         }
 
+        public override string ToString()
+        {
+            return Jsonizer.ToJsonString(this);
+        }
+        
     }
 }

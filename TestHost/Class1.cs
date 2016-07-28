@@ -7,33 +7,66 @@ using System.IO;
 using NGinnBPM.MessageBus;
 using NGinnBPM.Runtime;
 using D2 = NGinnBPM.Runtime.ProcessDSL2;
+using NGinnBPM.Runtime.ExecutionEngine;
+using System.Transactions;
+using NLog;
+using System.Threading.Tasks;
 
 namespace TestHost.cs
 {
+    
     public class Class1
     {
+        private static Logger log = LogManager.GetCurrentClassLogger();
+
         public static void Main(string[] args)
         {
+            EngineTests.RunTests();
+            return;
             //TestProcessDsl();
             //TestPackageRepo();
-            TestRepo2();
-            return;
+            //TestBpmn();
+            //TestRepo2();
+            //return;
             var c = ConfigureNGinnBPM();
 
-            var pr = c.GetInstance<ProcessRunner>();
-           // var proc = pr.StartProcess("Test2.TimerTest.1", new Dictionary<string,object> {});
+            /*using (var ts = new TransactionScope())
+            {
+                var pr = c.GetInstance<ProcessEngine>();
+                var proc = pr.StartProcess("Test2.DeferredChoice.1", new Dictionary<string, object> { });
+                var ti = pr.GetTaskInstanceInfo(proc);
+                ts.Complete();
+            }*/
 
+            using (var ts = new TransactionScope())
+            {
+                var pr = c.GetInstance<ProcessEngine>();
+                var proc = pr.StartProcess("EngineTest.Simplest.1", new Dictionary<string, object> { });
+                var ti = pr.GetTaskInstanceInfo(proc);
+                ts.Complete();
+            }
             //var proc = pr.StartProcess("Test2.ErrorHandlerTest.1", new Dictionary<string, object> { });
             //var proc = pr.StartProcess("Test2.MultiInstance.1", new Dictionary<string, object> { });
             //TestCompensation(pr);
-            TestProcessScriptGenerator(c);
+            //TestProcessScriptGenerator(c);
             Console.ReadLine();
 
         }
 
+        public static void TestBpmn()
+        {
+            //eclws\\activitiWF1\\MyProcess.bpmn
+            using (var sr = new StreamReader("C:\\temp\\diagram.bpmn", Encoding.UTF8))
+            {
+                var dfs = NGinnBPM.BPMNTools.Parser.BPMNParser.Parse(sr);
+                var x = dfs.rootElement;
+                Console.ReadLine();
+            }
+        }
+
         public static void TestRepo2()
         {
-            D2.BooProcessPackage p = new D2.BooProcessPackage("c:\\temp\\Test2");
+            D2.BooProcessPackage p = new D2.BooProcessPackage("..\\..\\..\\ProcessPackages\\Test2");
             foreach (string pn in p.ProcessNames)
             {
                 Console.WriteLine(pn);
@@ -57,7 +90,7 @@ namespace TestHost.cs
             Console.WriteLine(sw.ToString());
         }
 
-        public static void TestCompensation(ProcessRunner pr)
+        public static void TestCompensation(ProcessEngine pr)
         {
             var proc = pr.StartProcess("Test2.Compensation.1", new Dictionary<string, object> { });
             Console.WriteLine("Enter to cancel the process {0}", proc);

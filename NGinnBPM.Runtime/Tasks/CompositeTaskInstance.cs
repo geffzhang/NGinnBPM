@@ -192,6 +192,12 @@ namespace NGinnBPM.Runtime.Tasks
             return lst;
         }
 
+        public TransitionInfo GetChildTransitionInfo(string instanceId)
+        {
+            var ti = this.AllTasks.Find(x => x.InstanceId == instanceId);
+            return ti;
+        }
+
         /// <summary>
         /// Get active instance of specified task
         /// </summary>
@@ -266,7 +272,7 @@ namespace NGinnBPM.Runtime.Tasks
             {
                 return;
             }
-            log.Info("Composite task finished!");
+            log.Info("Composite task {0} finished!", TaskId);
             if (Status == TaskStatus.Cancelling)
             {
                 DefaultHandleTaskCancel(null);
@@ -376,7 +382,6 @@ namespace NGinnBPM.Runtime.Tasks
                         log.Warn("Deadlock detected in composite task {0} ({1}) of process {2}", InstanceId, TaskId, ProcessDefinitionId);
                         if (throwOnDeadlock)
                             throw new DeadlockException(this.InstanceId, this.TaskId, this.ProcessDefinitionId); 
-
                     }
                 }
             }
@@ -461,7 +466,7 @@ namespace NGinnBPM.Runtime.Tasks
                     };
                 }
 
-                msg.Mode = tsk.AllowSynchronousExec ? MessageHandlingMode.SameTransaction : MessageHandlingMode.AnotherTransaction;
+                //msg.Mode = tsk.AllowSynchronousExec ? MessageHandlingMode.SameTransaction : MessageHandlingMode.AnotherTransaction;
                 msg.CorrelationId = ti.InstanceId;
                 msg.FromTaskInstanceId = this.InstanceId;
                 msg.FromProcessInstanceId = this.ProcessInstanceId;
@@ -470,7 +475,7 @@ namespace NGinnBPM.Runtime.Tasks
                 msg.TaskId = tsk.Id;
             
                 AllTasks.Add(ti);
-                Context.SendTaskControlMessage(msg);
+                Context.EnableChildTask(msg);
                 log.Info("Child task {0} created: {1}", taskId, ti.InstanceId);
                 return ti.InstanceId;
             }
@@ -558,6 +563,7 @@ namespace NGinnBPM.Runtime.Tasks
                 ti.Status = TransitionStatus.Enabled;
             if (ti.Status == TransitionStatus.Enabled)
             {
+                log.Debug("Child task {0} ({1}) started", ti.InstanceId, ti.TaskId);
                 OnChildTaskStarted(tse.FromTaskInstanceId);
             }
             else
@@ -824,7 +830,7 @@ namespace NGinnBPM.Runtime.Tasks
                 ///now check the OrJoinCheckList. If there are tokens in places from the list,
                 ///don't enable the transition - we have to wait until all the tokens disappear from 
                 ///these places.
-                foreach (string plid in tsk.ORJoinChecklist)
+                foreach (string plid in tsk.OrJoinCheckList)
                 {
                     PlaceDef pl = MyTask.GetPlace(plid);
                     if (tsk.NodesIn.Contains(pl)) continue;
@@ -864,7 +870,10 @@ namespace NGinnBPM.Runtime.Tasks
             {
                 OnChildTaskStarted(ti.InstanceId);
             }
-            Debug.Assert(ti.Status == TransitionStatus.Started || ti.Status == TransitionStatus.FailedActive);
+            if (!(ti.Status == TransitionStatus.Started || ti.Status == TransitionStatus.FailedActive))
+            {
+                throw new Exception("Invalid transition status " + instanceId + ", status is " + ti.Status.ToString());
+            }
         }
 
 
@@ -898,11 +907,14 @@ namespace NGinnBPM.Runtime.Tasks
                 {
                     if (fd.IsCancelling)
                     {
-                        RemoveAllTokensInPlace(fd.To);
+                        log.Info("Compensation removing all tokens at {0}", fd.To);
+                        RemoveAllTokensInPlace(fd.To); //this one is tricky - what tokens do we remove when we have removed all tokens prior to compensation?
+                        //answer: removing tokens that were genereated as a part of compensation
                     }
                     else
                     {
-                        AddToken(fd.To);
+                        log.Info("Compensating token placed at {0}", fd.To);
+                        AddToken(fd.To); //generate compensating token
                     }
                 }
             }
@@ -1024,26 +1036,33 @@ namespace NGinnBPM.Runtime.Tasks
             TaskDef tsk = MyTask.GetTask(ti.TaskId);
             if (ti.Status == TransitionStatus.Enabling)
                 ti.Status = TransitionStatus.Enabled;
-            if (tce is MultiTaskCompleted)
-            {
-                MultiTaskCompleted mce = (MultiTaskCompleted)tce;
-                if (!string.IsNullOrEmpty(tsk.MultiInstanceResultsBinding) && mce.MultiOutputData != null)
-                {
-                    TaskData[tsk.MultiInstanceResultsBinding] = mce.MultiOutputData;
-                }
-            }
-            else 
-            {
-                if (tce.OutputData != null)
-                {
-                    ScriptRuntime.ExecuteChildTaskOutputDataBinding(this, tsk, tce.OutputData, Context);
-                }
-            }
 
-            //
-            ConsumeTaskInputTokens(tce.FromTaskInstanceId);
-            ti.Status = TransitionStatus.Completed;
-            ProduceTaskOutputTokens(ti.InstanceId);
+            if (ti.Status == TransitionStatus.Enabled || ti.Status == TransitionStatus.Started)
+            {
+                ConsumeTaskInputTokens(tce.FromTaskInstanceId);
+                if (tce is MultiTaskCompleted)
+                {
+                    MultiTaskCompleted mce = (MultiTaskCompleted)tce;
+                    if (!string.IsNullOrEmpty(tsk.MultiInstanceResultsBinding) && mce.MultiOutputData != null)
+                    {
+                        TaskData[tsk.MultiInstanceResultsBinding] = mce.MultiOutputData;
+                    }
+                }
+                else
+                {
+                    if (tce.OutputData != null)
+                    {
+                        ScriptRuntime.ExecuteChildTaskOutputDataBinding(this, tsk, tce.OutputData, Context);
+                    }
+                }
+                ti.Status = TransitionStatus.Completed;
+                ProduceTaskOutputTokens(ti.InstanceId);
+            }
+            else
+            {
+                ti.Status = TransitionStatus.Completed;
+                log.Warn("Task {0} has completed, but the transition status was {1} and it did not produce output tokens or execute data bindings", ti.InstanceId, ti.Status);
+            }
         }
 
         /// <summary>
@@ -1062,7 +1081,6 @@ namespace NGinnBPM.Runtime.Tasks
         /// <param name="ev"></param>
         protected virtual void OnChildTaskStarted(string childInstanceId)
         {
-            log.Debug("Child task started: {0}", childInstanceId);
             TransitionInfo ti = GetTransitionInfo(childInstanceId);
             if (ti.Status != TransitionStatus.Enabled)
                 throw new Exception();
@@ -1197,20 +1215,13 @@ namespace NGinnBPM.Runtime.Tasks
                 return;
             }
             ti.Status = TransitionStatus.Cancelling;
-            Context.SendTaskControlMessage(new CancelTask
+            Context.CancelChildTask(new CancelTask
             {
                 FromProcessInstanceId = this.ProcessInstanceId,
                 FromTaskInstanceId = this.InstanceId,
                 ToTaskInstanceId = ti.InstanceId,
                 Reason = ""
             });
-            /* RG v2 - to framework niech zalatwi...
-            if (ti.Status == TransitionStatus.Cancelling)
-            {
-                Context.MessageBus.NewMessage(new CancelTaskTimeout { TargetTaskInstanceId = this.InstanceId, ChildInstanceId = ti.InstanceId })
-                    .SetDeliveryDate(DateTime.Now.AddHours(24))
-                    .Publish();
-            }*/
             //Context.MessageBus.Notify(new object[] {ctm, new ScheduledMessage(ctt, DateTime.Now.AddHours(24))});
         }
 
@@ -1240,8 +1251,8 @@ namespace NGinnBPM.Runtime.Tasks
             ti.Status = TransitionStatus.Cancelled;
             if (doCancel)
             {
-#warning: don't we have to handle TransitionStatus.Cancelling here (hm, why?)
-                Context.SendTaskControlMessage(new CancelTask
+#warning: don't we have to handle TransitionStatus.Cancelling here (hm, why? maybe we don't care?)
+                Context.CancelChildTask(new CancelTask
                 {
                     FromProcessInstanceId = this.ProcessInstanceId,
                     FromTaskInstanceId = this.InstanceId,
@@ -1555,5 +1566,20 @@ namespace NGinnBPM.Runtime.Tasks
                 log.Debug("Child task {1} ({0}) cancellation timeout - ignoring because the transition is not in cancelling. ", ti.InstanceId, ti.TaskId);
             }
         }*/
+
+        public override string ToString()
+        {
+            var state = new Dictionary<string, object>
+            { { "Marking", this.Marking },
+                { "ActiveTasks", this.ActiveTasks },
+                {"Status", this.Status},
+                {"InstanceId", this.InstanceId},
+                {"TaskId", this.TaskId},
+                {"Data", this.TaskData},
+                {"ProcessDefinition", this.ProcessDefinitionId},
+                {"ProcessInstanceId", this.ProcessInstanceId}
+            };
+            return Jsonizer.ToJsonString(state);
+        }
     }
 }

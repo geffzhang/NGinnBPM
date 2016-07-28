@@ -29,8 +29,8 @@ namespace NGinnBPM.Runtime.ProcessDSL2
         /// Documents retrieved for each 'docref' input/local variable
         /// </summary>
         protected BL.IQuackFu Documents { get; set; }
-        
 
+        
         public void Initialize(ProcessDef pd, BooProcessPackage pp)
         {
             ProcessDefinition = pd;
@@ -47,12 +47,12 @@ namespace NGinnBPM.Runtime.ProcessDSL2
 
         public void SetInputData(Dictionary<string, object> data)
         {
-            InputData = new QuackTaskDataWrapper(data);
+            InputData = data == null ? null : new QuackTaskDataWrapper(data);
         }
 
         public void SetOutputData(Dictionary<string, object> data)
         {
-            OutputData = new QuackTaskDataWrapper(data);
+            OutputData = data == null ? null : new QuackTaskDataWrapper(data);
         }
 
         public void SetItem(object v)

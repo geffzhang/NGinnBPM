@@ -8,20 +8,30 @@ namespace NGinnBPM.Runtime
 {
     public interface ITaskExecutionContext
     {
-        void NotifyTaskEvent(TaskExecutionEvents.TaskExecEvent ev);
+        void EnableChildTask(TaskExecutionEvents.EnableChildTask msg);
+
+        void CancelChildTask(TaskExecutionEvents.CancelTask msg);
+
         /// <summary>
-        /// Send a task control request.
-        /// Warning: this will not execute synchronously. It will be executed later, when processing
-        /// messages in a transaction. So you cannot assume that after send returns then the message has already
-        /// been processed.
-        /// What is worse, if something fails you will not get that information from Send. You might even not get anything at all.
-        /// But if an exception occurs during message processing an exception will be thrown and whole transaciton
-        /// will be rolled back, so you don't really have to worry about messages failing.
+        /// starts a child process 
+        /// On completion/failure/cancellation we should get a message 
         /// </summary>
-        /// <param name="msg"></param>
-        void SendTaskControlMessage(TaskExecutionEvents.TaskControlCommand msg);
+        /// <param name="definitionId"></param>
+        /// <param name="inputData"></param>
+        /// <param name="parentTaskInstanceId"></param>
+        /// <param name="parentProcessInstance"></param>
+        /// <returns></returns>
+       // string StartProcess(string definitionId, Dictionary<string, object> inputData, string parentTaskInstanceId, string parentProcessInstance);
+
+        /// <summary>
+        /// Schedule a task event with future delivery date
+        /// </summary>
+        /// <param name="ev"></param>
+        /// <param name="deliveryDate"></param>
         void ScheduleTaskEvent(TaskExecutionEvents.TaskExecEvent ev, DateTime deliveryDate);
+
         T GetService<T>();
+        
         T GetService<T>(string name);
         
     }

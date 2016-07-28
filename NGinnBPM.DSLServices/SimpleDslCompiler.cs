@@ -73,6 +73,7 @@ namespace NGinnBPM.DSLServices
     /// </summary>
     public class SimpleBaseClassDslCompiler<T>
     {
+        protected Type _actualBaseType = typeof(T);
         /// <summary>
         /// 
         /// </summary>
@@ -115,6 +116,12 @@ namespace NGinnBPM.DSLServices
             DSLMethodName = "Prepare";
         }
 
+        public SimpleBaseClassDslCompiler(ISimpleScriptStorage storage, Type actualBaseType) : this(storage)
+        {
+            if (!typeof(T).IsAssignableFrom(actualBaseType)) throw new Exception("actualBaseType does not inherit from T");
+            _actualBaseType = actualBaseType;
+        }
+
         /// <summary>
         /// dsl import namespaces
         /// </summary>
@@ -146,6 +153,21 @@ namespace NGinnBPM.DSLServices
         }
 
         /// <summary>
+        /// URLS of scripts that have been compiled
+        /// </summary>
+        public virtual IEnumerable<string> CompiledScriptUrls
+        {
+            get
+            {
+                lock (_typeCache)
+                {
+                    return _typeCache.Where(kv => kv.Value.DslType != null).Select(kv => kv.Key);
+                }
+            }
+        }
+
+
+        /// <summary>
         /// 
         /// </summary>
         /// <param name="url"></param>
@@ -153,6 +175,11 @@ namespace NGinnBPM.DSLServices
         public virtual T Create(string url)
         {
             Type tp = GetCompiledDslType(url);
+            var ci = tp.GetConstructor(new Type[] { typeof(string) });
+            if (ci != null)
+            {
+                return (T) ci.Invoke(new object[] { url });
+            }
             return (T) Activator.CreateInstance(tp);
         }
 
@@ -186,10 +213,12 @@ namespace NGinnBPM.DSLServices
                 catch (Exception ex)
                 {
                     _typeCache["_123compile_error"] = new TypeCacheEntry { Url = ex.Message };
+                    Console.WriteLine("Error when compiling all urls - will try to recompile only {1}: {0}", ex, url);
                 }
             }
             TypeCacheEntry tp;
             if (_typeCache.TryGetValue(url, out tp)) return tp.DslType;
+            Console.WriteLine("type not found in cache - compiling only {0}", url);
             Type t2 = TryRecompile(url, CompilationMode.Compile);
             return t2;
         }
@@ -212,7 +241,12 @@ namespace NGinnBPM.DSLServices
                     Type tp = cc.GeneratedAssembly.GetType(tn);
                     if (tp == null)
                     {
-                        throw new Exception("Type not found for url: " + url);
+                        foreach (var t in cc.GeneratedAssembly.GetTypes())
+                        {
+                            Console.WriteLine("Type: {0}", t.FullName);
+                        }
+
+                        throw new Exception("Type not found for url: " + url + ", type name: " + tn);
                     }
                     TypeCacheEntry tce = new TypeCacheEntry
                     {
@@ -354,6 +388,7 @@ namespace NGinnBPM.DSLServices
             {
                 _compilationCallback(compilerContext, urls);
             }
+            
             if (compilerContext.Errors.Count != 0)
                 throw CreateCompilerException(compilerContext);
             HandleWarnings(compilerContext.Warnings);
@@ -380,7 +415,7 @@ namespace NGinnBPM.DSLServices
                 catch (Exception) {  }
             }*/
 
-            pipeline.Insert(1, new ImplicitBaseClassCompilerStep(typeof(T), DSLMethodName, Namespaces.ToArray()));
+            pipeline.Insert(1, new ImplicitBaseClassCompilerStep(_actualBaseType, DSLMethodName, Namespaces.ToArray()));
         }
 
         private Action<CompilerContext, string[]> _compilationCallback;
